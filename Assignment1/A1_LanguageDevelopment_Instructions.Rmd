@@ -1,0 +1,484 @@
+---
+title: "Assignment 1 - Language development in autistic and neurotypical children"
+author: "Study group 9"
+output: html_document
+date: "2022-08-15"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Assignment 1  - Language development in autistic and neurotypical children
+
+## Quick recap
+Autism Spectrum Disorder is often related to language impairment. However, this phenomenon has rarely been empirically traced in detail: i) relying on actual naturalistic language production, ii) over extended periods of time.
+
+We therefore videotaped circa 30 kids with ASD and circa 30 comparison kids (matched by linguistic performance at visit 1) for ca. 30 minutes of naturalistic interactions with a parent. We repeated the data collection 6 times per kid, with 4 months between each visit. We transcribed the data and counted: 
+i) the amount of words that each kid uses in each video. Same for the parent.
+ii) the amount of unique words that each kid uses in each video. Same for the parent.
+iii) the amount of morphemes per utterance (Mean Length of Utterance) displayed by each child in each video. Same for the parent. 
+
+This data is in the file you prepared in the previous class, but you can also find it here:https://www.dropbox.com/s/d6eerv6cl6eksf3/data_clean.csv?dl=0
+
+
+## The structure of the assignment
+
+We will be spending a few weeks with this assignment. In particular, we will:
+
+Part 1) simulate data in order to better understand the model we need to build, and to better understand how much data we would have to collect to run a meaningful study (precision analysis)
+
+Part 2) analyze our empirical data and interpret the inferential results
+
+Part 3) use your model to predict the linguistic trajectory of new children and assess the performance of the model based on that.
+
+As you work through these parts, you will have to produce a written document (separated from the code) answering the following questions:
+
+Q1 - Briefly describe your simulation process, its goals, and what you have learned from the simulation. Add at least a plot showcasing the results of the simulation. Make a special note on sample size considerations: how much data do you think you will need? what else could you do to increase the precision of your estimates?
+
+Q2 - Briefly describe the empirical data and how they compare to what you learned from the simulation (what can you learn from them?). Briefly describe your model(s) and model quality. Report the findings: how does development differ between autistic and neurotypical children (N.B. remember to report both population and individual level findings)? which additional factors should be included in the model? Add at least one plot showcasing your findings.
+
+Q3 - Given the model(s) from Q2, how well do they predict the data? Discuss both in terms of absolute error in training vs testing; and in terms of characterizing the new kids' language development as typical or in need of support.
+
+
+Below you can find more detailed instructions for each part of the assignment.
+
+## Part 1 - Simulating data
+
+Before we even think of analyzing the data, we should make sure we understand the problem, and we plan the analysis. To do so, we need to simulate data and analyze the simulated data (where we know the ground truth).
+
+In particular, let's imagine we have n autistic and n neurotypical children. We are simulating their average utterance length (Mean Length of Utterance or MLU) in terms of words, starting at Visit 1 and all the way to Visit 6.
+In other words, we need to define a few parameters:
+- average MLU for ASD (population mean) at Visit 1 and average individual deviation from that (population standard deviation)
+- average MLU for TD (population mean) at Visit 1 and average individual deviation from that (population standard deviation)
+- average change in MLU by visit for ASD (population mean) and average individual deviation from that (population standard deviation)
+- average change in MLU by visit for TD (population mean) and average individual deviation from that (population standard deviation)
+- an error term. Errors could be due to measurement, sampling, all sorts of noise. 
+
+Note that this makes a few assumptions: population means are exact values; change by visit is linear (the same between visit 1 and 2 as between visit 5 and 6). This is fine for the exercise. In real life research, you might want to vary the parameter values much more, relax those assumptions and assess how these things impact your inference.
+
+
+We go through the literature and we settle for some values for these parameters:
+- average MLU for ASD and TD: 1.5 (remember the populations are matched for linguistic ability at first visit)
+- average individual variability in initial MLU for ASD 0.5; for TD 0.3 (remember ASD tends to be more heterogeneous)
+- average change in MLU for ASD: 0.4; for TD 0.6 (ASD is supposed to develop less)
+- average individual variability in change for ASD 0.4; for TD 0.2 (remember ASD tends to be more heterogeneous)
+- error is identified as 0.2
+
+This would mean that on average the difference between ASD and TD participants is 0 at visit 1, 0.2 at visit 2, 0.4 at visit 3, 0.6 at visit 4, 0.8 at visit 5 and 1 at visit 6.
+
+With these values in mind, simulate data, plot the data (to check everything is alright); and set up an analysis pipeline.
+Remember the usual bayesian workflow:
+- define the formula
+- define the prior
+- prior predictive checks
+- fit the model
+- model quality checks: traceplots, divergences, rhat, effective samples
+- model quality checks: posterior predictive checks, prior-posterior update checks
+- model comparison
+
+Once the pipeline is in place, loop through different sample sizes to assess how much data you would need to collect. N.B. for inspiration on how to set this up, check the tutorials by Kurz that are linked in the syllabus.
+
+BONUS questions for Part 1: what if the difference between ASD and TD was 0? how big of a sample size would you need? What about different effect sizes, and different error terms?
+
+```{r loading packages and setting theme}
+
+pacman::p_load(tidyverse, brms, cmdstanr, ggpubr)
+
+theme_set(theme_minimal())
+
+```
+
+```{r simulating data}
+
+# Assign values
+n <- 360
+visits <- 6
+mu_asd <- log(1.5)
+sigma_asd <- log(1.5) - log(1.5-0.5)
+mu_td <- log(1.5)
+sigma_td <- log(1.5) - log(1.5-0.3)
+mu_visit_asd <- 0.09
+sigma_visit_asd <- 0.035
+mu_visit_td <- 0.18
+sigma_visit_td <- 0.025
+x <- c("ASD", "TD")
+
+# Create data frame
+df <- tibble(ID = rep(1:60, each = 6)) %>%
+  mutate(Visit = rep(1:6, times = 60)) %>% 
+  mutate(Diagnosis = rep(x, each = 180))
+ 
+
+
+# loop intercepts and slopes
+for (i in seq(n)) {
+  df$IndividualIntercept[df$ID == i & df$Diagnosis == "ASD"] <- rnorm(1, mu_asd, sigma_asd)
+  df$IndividualIntercept[df$ID == i & df$Diagnosis == "TD"] <- rnorm(1, mu_td, sigma_td)
+  df$IndividualSlope[df$ID == i & df$Diagnosis == "ASD"] <- rnorm(1, mu_visit_asd, sigma_visit_asd)
+  df$IndividualSlope[df$ID == i & df$Diagnosis == "TD"] <- rnorm(1, mu_visit_td, sigma_visit_td)
+}  
+
+
+# Simulate MLU
+for (i in seq(n)) {
+  df$MLU[i] <- exp(rnorm(1, df$IndividualIntercept[i] + df$IndividualSlope[i] * (df$Visit[i] - 1), sd = 0.2))
+}
+
+# Plot
+ggplot(df, aes(Visit, MLU, color = Diagnosis, group = ID)) + 
+  geom_point() + 
+  geom_line(alpha = 0.3)
+
+# Check MLU
+max(df$MLU)
+min(df$MLU)
+mean(df$MLU)
+
+```
+
+```{r analysing simulated data}
+
+# Define formulas
+m0 <- bf(MLU ~ 1)
+m1 <- bf(MLU ~ 0 + Diagnosis)
+m2 <- bf(MLU ~ 0 + Diagnosis + Diagnosis:Visit)
+m3 <- bf(MLU ~ 0 + Diagnosis + Diagnosis:Visit + (1 + Visit|ID))
+m4 <- bf(MLU ~ 0 + Diagnosis + Diagnosis:Visit + (1 + Visit|gr(ID, by = Diagnosis)))
+
+# Define priors
+p1 <- c(
+  prior(normal(0, 0.1), class = b),
+  prior(normal(0.4, 0.1), class = b, coef = "DiagnosisASD"),
+  prior(normal(0.4, 0.1), class = b, coef = "DiagnosisTD"), 
+  prior(normal(0, 0.1), class = sd, coef = Intercept, group = ID),
+  prior(normal(0, 0.05), class = sd, coef = Visit, group = ID) 
+)  
+
+# Fitting models
+prior_fit <- brm(
+  m1, data = df, prior = p1, sample_prior = "only", backend = "cmdstanr", chains = 2, cores = 2, control = list(adapt_delta = 0.99, max_treedepth = 20), family = lognormal
+)
+
+model_fit <- brm(
+  m1, data = df, prior = p1, sample_prior = T, backend = "cmdstanr", chains = 2, cores = 2, control = list(adapt_delta = 0.99, max_treedepth = 20), family = lognormal
+)
+
+# Checking priors
+pp_check(prior_fit, ndraws = 100)
+
+# Cheking fit
+pp_check(model_fit, ndraws = 100)
+
+
+
+posterior <- as_draws_df(model_fit)
+
+
+plot1 <- ggplot(posterior) + 
+  geom_histogram(aes(prior_b_DiagnosisASD), fill = "red", color = "black", alpha = 0.3, bins = 50) +
+  geom_histogram(aes(b_DiagnosisASD), fill = "green", color = "black", alpha = 0.3, bins = 50) +
+  geom_histogram(aes(b_DiagnosisTD), fill = "yellow", color = "black", alpha = 0.3, bins = 50) +
+  xlab("Prior-posterior update check on the intercepts")
+
+
+
+plot2 <- ggplot(posterior) + 
+  geom_histogram(aes(prior_sd_ID__Intercept), fill = "red", color = "black", alpha = 0.3, bins = 50) +
+  geom_histogram(aes(sd_ID__Intercept), fill = "green", color = "black", alpha = 0.3, bins = 50) +
+  xlab("Prior-posterior update check on the intercepts")
+
+
+
+plot3 <- ggplot(posterior) + 
+  geom_histogram(aes(`prior_b_DiagnosisASD:Visit`), fill = "red", color = "black", alpha = 0.3, bins = 50) + geom_histogram(aes(`b_DiagnosisASD:Visit`), fill = "green", color = "black", alpha = 0.3, bins = 50) + geom_histogram(aes(`b_DiagnosisTD:Visit`), fill = "yellow", color = "black", alpha = 0.3, bins = 50) + xlab("Prior-posterior update check on the slope by visit")
+
+
+
+plot4 <- ggplot(posterior) + 
+  geom_histogram(aes(prior_sd_ID__Visit), fill = "red", color = "black", alpha = 0.3, bins = 50) +
+  geom_histogram(aes(sd_ID__Visit), fill = "green", color = "black", alpha = 0.3, bins = 50) + 
+  xlab("Prior-posterior update check on the variability of the slope")
+
+
+
+plot5 <- ggplot(posterior) + 
+  geom_histogram(aes(prior_cor_ID), fill = "red", color = "black", alpha = 0.3, bins = 50) +
+  geom_histogram(aes(cor_ID__Intercept__Visit), fill = "green", color = "black", alpha = 0.3, bins = 50) +
+  xlab("Prior-posterior update check on the correlation")
+
+
+# Wrapping them plots
+ggarrange(plot1, plot2, plot3, plot4, plot5, rremove("x.text"), ncol = 2, nrow = 3)
+
+# Model output
+summary(model_fit)
+
+
+```
+
+
+
+# Part 2 - Strong in the Bayesian ken, you are now ready to analyse the actual data
+
+- Describe your sample (n, age, gender, clinical and cognitive features of the two groups) and critically assess whether the groups (ASD and TD) are balanced. Briefly discuss whether the data is enough given the simulations in part 1.
+- Describe linguistic development (in terms of MLU over time) in TD and ASD children (as a function of group). Discuss the difference (if any) between the two groups.
+- Describe individual differences in linguistic development: do all kids follow the same path? Are all kids reflected by the general trend for their group?
+
+- Include additional predictors in your model of language development (N.B. not other indexes of child language: types and tokens, that'd be cheating). Identify the best model, by conceptual reasoning, model comparison or a mix. Report the model you choose (and name its competitors, if any) and discuss why it's the best model.
+
+```{r}
+
+# Load data
+real_df <- read_csv("data_clean.csv")
+
+```
+```{r}
+
+# Run through analysis pipeline
+
+# Subset
+real_df_sub <- real_df %>% 
+  select(Visit, Child.ID, Diagnosis, CHI_MLU) %>% 
+  filter(CHI_MLU != 0) %>% 
+  filter(CHI_MLU != "na") %>% 
+  mutate(Diagnosis = as.factor(Diagnosis))
+
+# Define formula
+r_m0 <- bf(CHI_MLU ~ 0 + Diagnosis + Diagnosis:Visit + (1 + Visit|Child.ID))
+
+
+# Define priors
+p2 <- c(
+  prior(normal(0, 0.1), class = b),
+  prior(normal(0.4, 0.1), class = b, coef = "DiagnosisASD"),
+  prior(normal(0.4, 0.1), class = b, coef = "DiagnosisTD"), 
+  prior(normal(0, 0.1), class = sd, coef = Intercept, group = Child.ID),
+  prior(normal(0, 0.05), class = sd, coef = Visit, group = Child.ID) 
+)  
+
+# Fitting priors
+real_prior_fit <- brm(
+  r_m0, data = real_df_sub, prior = p2, sample_prior = "only", backend = "cmdstanr", chains = 2, cores = 2, control = list(adapt_delta = 0.99, max_treedepth = 20), family = lognormal
+)
+
+# Fitting model
+real_model_fit1 <- brm(
+  r_m0, data = real_df_sub, prior = p2, sample_prior = T, backend = "cmdstanr", chains = 2, cores = 2, control = list(adapt_delta = 0.99, max_treedepth = 20), family = lognormal
+)
+
+
+# Check priors
+pp_check(real_prior_fit, ndraws = 100)
+
+# Check model
+pp_check(real_model_fit1, ndraws = 100)
+
+
+posterior2 <- as_draws_df(real_model_fit1)
+
+
+
+real_plot1 <- ggplot(posterior2) + geom_histogram(aes(prior_b_DiagnosisASD), fill = "red", color = "black", alpha = 0.3, bins = 50) + geom_histogram(aes(b_DiagnosisASD), fill = "green", color = "black", alpha = 0.3, bins = 50) + geom_histogram(aes(b_DiagnosisTD), fill = "yellow", color = "black", alpha = 0.3, bins = 50) + xlab("Prior-posterior update check on the intercepts")
+
+
+
+
+real_plot2 <- ggplot(posterior2) + geom_histogram(aes(prior_sd_Child.ID__Intercept), fill = "red", color = "black", alpha = 0.3, bins = 50) + geom_histogram(aes(sd_Child.ID__Intercept), fill = "green", color = "black", alpha = 0.3, bins = 50) + xlab("Prior-posterior update check on the intercepts")
+
+
+
+real_plot3 <- ggplot(posterior2) + 
+  geom_histogram(aes(`prior_b_DiagnosisASD:Visit`), fill = "red", color = "black", alpha = 0.3, bins = 50) + 
+  geom_histogram(aes(`b_DiagnosisASD:Visit`), fill = "green", color = "black", alpha = 0.3, bins = 50) +
+  geom_histogram(aes(`b_DiagnosisTD:Visit`), fill = "yellow", color = "black", alpha = 0.3, bins = 50) +
+  xlab("Prior-posterior update check on the slope by visit")
+
+
+
+
+real_plot4 <- ggplot(posterior2) + 
+  geom_histogram(aes(prior_sd_Child.ID__Visit), fill = "red", color = "black", alpha = 0.3, bins = 50) +
+  geom_histogram(aes(sd_Child.ID__Visit), fill = "green", color = "black", alpha = 0.3, bins = 50) + 
+  xlab("Prior-posterior update check on the variability of the slope")
+
+
+
+
+real_plot5 <- ggplot(posterior2) + 
+  geom_histogram(aes(prior_cor_Child.ID), fill = "red", color = "black", alpha = 0.3, bins = 50) +
+  geom_histogram(aes(cor_Child.ID__Intercept__Visit), fill = "green", color = "black", alpha = 0.3, bins = 50) +
+  xlab("Prior-posterior update check on the correlation")
+
+
+# Wrapping plots
+ggarrange(real_plot1, real_plot2, real_plot3, real_plot4, real_plot5, rremove("x.text"), ncol = 2, nrow = 3)
+
+# Model output
+summary(real_model_fit1)
+
+```
+
+```{r} 
+
+#Plotting predictors
+predictor1 <- ggplot(real_df_final, aes(verbalIQ1_z, CHI_MLU, color = Diagnosis)) + geom_smooth() + geom_point()
+
+
+predictor2 <- ggplot(real_df_final, aes(Socialization1_z, CHI_MLU, color = Diagnosis)) + geom_smooth() + geom_point()
+
+
+predictor3 <- ggplot(real_df_final, aes(types_MOT1_z, CHI_MLU, color = Diagnosis)) + geom_point() + geom_smooth()
+
+
+predictor4 <- ggplot(real_df_final, aes(nonVerbalIQ1_z, CHI_MLU, color = Diagnosis)) + geom_point() + geom_smooth()
+
+
+predictor5 <- ggplot(real_df_final, aes(MOT_MLU1_z, CHI_MLU, color = Diagnosis)) + geom_point() + geom_smooth()
+
+
+predictor6 <- ggplot(real_df_final, aes(tokens_MOT1_z, CHI_MLU, color = Diagnosis)) + geom_point() + geom_smooth()
+
+
+ggarrange(predictor1, predictor2, predictor3, predictor4, predictor5, rremove("x.text"), ncol = 2, nrow = 3)
+
+```
+
+
+```{r Introducing additional predictors and comparing models}
+
+# Subsetting chosen predictors
+visit1_MOT_MLU <- real_df %>%
+  filter(Visit == 1) %>%
+  filter(MOT_MLU != "NA") %>% 
+  select("Child.ID", "Visit", "MOT_MLU", "types_MOT", "tokens_MOT") %>%
+  mutate(MOT_MLU1_z = (MOT_MLU - mean(MOT_MLU))/sd(MOT_MLU), types_MOT1_z = (types_MOT - mean(types_MOT))/sd(types_MOT), tokens_MOT1_z = (tokens_MOT - mean(tokens_MOT))/sd(tokens_MOT))
+
+# Merging dataframes  
+real_df_z <- inner_join(real_df, visit1_MOT_MLU, by = "Child.ID")
+
+# Standardizing
+real_df_final <- real_df_z %>% 
+  filter(Child.ID != 1) %>% 
+  mutate(Socialization1_z = (Socialization1 - mean(Socialization1))/sd(Socialization1), verbalIQ1_z = (verbalIQ1 - mean(verbalIQ1))/sd(verbalIQ1), nonVerbalIQ1_z = (nonVerbalIQ1 - mean(nonVerbalIQ1))/sd(nonVerbalIQ1))
+
+# Defining formulas
+ind_m1 <- bf(CHI_MLU ~ 0 + Diagnosis + Diagnosis:Visit.x + Diagnosis:verbalIQ1_z + Diagnosis:nonVerbalIQ1_z + Diagnosis:Socialization1_z + (1 + Visit.x|Child.ID))
+
+env_m2 <- bf(CHI_MLU ~ 0 + Diagnosis + Diagnosis:Visit.x + Diagnosis:MOT_MLU1_z + Diagnosis:types_MOT1_z + Diagnosis:tokens_MOT1_z + (1 + Visit.x|Child.ID))
+
+ind_env_m3 <- bf(CHI_MLU ~ 0 + Diagnosis + Diagnosis:Visit.x + Diagnosis:verbalIQ1_z + Diagnosis:nonVerbalIQ1_z + Diagnosis:Socialization1_z + Diagnosis:MOT_MLU1_z + Diagnosis:types_MOT1_z + Diagnosis:tokens_MOT1_z + (1 + Visit.x|Child.ID))
+
+
+# Defining priors
+p3 <- c(
+  prior(normal(0, 0.1), class = b),
+  prior(normal(0.4, 0.1), class = b, coef = "DiagnosisASD"),
+  prior(normal(0.4, 0.1), class = b, coef = "DiagnosisTD"), 
+  prior(normal(0, 0.1), class = sd, coef = Intercept, group = Child.ID),
+  prior(normal(0, 0.05), class = sd, coef = Visit.x, group = Child.ID) 
+)  
+
+# Fitting models
+real_model_fit2 <- brm(ind_m1, data = real_df_final, prior = p3, sample_prior = T, backend = "cmdstanr", chains = 2, cores = 2, control = list(adapt_delta = 0.99, max_treedepth = 20), family = gaussian)
+
+pp_check(real_model_fit2, ndraws = 100)
+
+
+real_model_fit3 <- brm(env_m2, data = real_df_final, prior = p3, sample_prior = T, backend = "cmdstanr", chains = 2, cores = 2, control = list(adapt_delta = 0.99, max_treedepth = 20), family = gaussian)
+
+pp_check(real_model_fit3, ndraws = 100)
+
+
+real_model_fit4 <- brm(ind_env_m3, data = real_df_final, prior = p3, sample_prior = T, backend = "cmdstanr", chains = 2, cores = 2, control = list(adapt_delta = 0.99, max_treedepth = 20), family = gaussian)
+
+pp_check(real_model_fit4, ndraws = 100)
+
+```
+
+```{r Model comparison}
+
+# Add criterions to models
+
+real_model_fit1_loo1 <- add_criterion(real_model_fit1_loo1, criterion = "loo", moment_match = TRUE)
+
+real_model_fit_loo2 <- add_criterion(real_model_fit2, criterion = "loo", moment_match = TRUE)
+
+real_model_fit_loo3 <- add_criterion(real_model_fit3, criterion = "loo", moment_match = TRUE)
+
+real_model_fit_loo4 <- add_criterion(real_model_fit4, criterion = "loo", moment_match = TRUE)
+
+# Compare models on information criterion
+
+loo_compare(real_model_fit_loo2, real_model_fit_loo3, real_model_fit_loo4)
+
+loo_model_weights(real_model_fit_loo2, real_model_fit_loo3, real_model_fit_loo4)
+
+```
+
+
+```{r Cross-validation}
+
+# Split in k folds
+kfold1 <- kfold(real_model_fit1, folds = "stratified", group = "Child.ID", K = 5,save_fits = TRUE)
+
+kfold2 <- kfold(real_model_fit2, folds = "stratified", group = "Child.ID", K = 5,save_fits = TRUE)
+
+kfold3 <- kfold(real_model_fit3, folds = "stratified", group = "Child.ID", K = 5,save_fits = TRUE)
+
+kfold4 <- kfold(real_model_fit4, folds = "stratified", group = "Child.ID", K = 5,save_fits = TRUE)
+
+# Define loss function
+rmse <- function(y,yrep) {
+  yrep_mean <- colMeans(yrep)
+  sqrt(mean((yrep_mean-y)^2))
+}
+
+# Predict responses and evaluate the loss
+kfp1 <- kfold_predict(kfold1)
+kfp_test1 <- kfold_predict(kfold1)
+
+kfp2 <- kfold_predict(kfold2)
+kfp_test2 <- kfold_predict(kfold2)
+
+kfp3 <- kfold_predict(kfold3)
+kfp_test3 <- kfold_predict(kfold3)
+
+kfp4 <- kfold_predict(kfold4)
+kfp_test4 <- kfold_predict(kfold4)
+
+# Compute rmse
+rmse(kfp1$y, kfp1$yrep)
+rmse(kfp_test1$y, kfp_test1$yrep)
+
+rmse(kfp2$y, kfp2$yrep)
+rmse(kfp_test2$y, kfp_test2$yrep)
+
+rmse(kfp3$y, kfp3$yrep)
+rmse(kfp_test3$y, kfp_test3$yrep)
+
+rmse(kfp4$y, kfp4$yrep)
+rmse(kfp_test4$y, kfp_test4$yrep)
+```
+
+
+Part 3 - From explanation to prediction
+
+N.B. There are several datasets for this exercise, so pay attention to which one you are using!
+
+1. The (training) dataset from last time (the awesome one you produced :-) ).
+2. The (test) datasets on which you can test the models from last time:
+* Demographic and clinical data: https://www.dropbox.com/s/ra99bdvm6fzay3g/demo_test.csv?dl=1
+* Utterance Length data: https://www.dropbox.com/s/uxtqqzl18nwxowq/LU_test.csv?dl=1
+* Word data: https://www.dropbox.com/s/1ces4hv8kh0stov/token_test.csv?dl=1
+
+Relying on the model(s) you trained in part 2 of the exercise, create predictions for the test set and assess how well they do compared to the actual data.
+
+- Discuss the differences in performance of your model in training and testing data. Is the model any good?
+- Let's assume you are a speech therapy clinic. You want to assess whether the kids in your test sample will have a typical (like a TD) development, or they will have a worse one, in which case they should get speech therapy support. What do your predictions tell you about that? Which kids would you provide therapy for? Is the model any good?
+
+```{r}
+
+
+```
+

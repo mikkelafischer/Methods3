@@ -1,7 +1,7 @@
 ---
 title: "Assignment 1 - Data Cleaning - Instructions"
-author: "[FILL IN YOUR NAME]"
-date: "[FILL IN THE DATE]"
+author: "Mikkel Albjerg Fischer"
+date: "16-09-2022"
 output: html_document
 ---
 
@@ -197,7 +197,6 @@ Feel free to rename the variables into something you can remember (i.e. nonVerba
 demo_sub <- demo %>% 
   select("ID", "Visit", "Diagnosis", "Ethnicity", "Gender", "Age", "ADOS", "MullenRaw", "ExpressiveLangRaw", "Socialization")
 
-
 LU_sub <- LU %>%  
   select("ID", "Visit", "MOT_MLU", "CHI_MLU")
 
@@ -215,7 +214,9 @@ Some things to pay attention to:
 
 ```{r}
 
-merged_df <- inner_join(demo_sub, token_sub, LU_sub, by = c("ID", "Visit"))
+merged_df <- inner_join(demo_sub, token_sub, by = c("ID", "Visit"))
+
+merged_df <- inner_join(merged_df, LU_sub, by = c("ID", "Visit"))
 
 ```
 
@@ -235,8 +236,7 @@ A possible way to do so:
 visit1_df <- merged_df %>%
   filter(Visit == 1) %>% 
   select("ID", "Visit", "ADOS", "MullenRaw", "ExpressiveLangRaw", "Socialization") %>% 
-  rename(ADOS1 = ADOS, MullenRaw1 = MullenRaw, ExpressiveLangRaw1 = ExpressiveLangRaw, Socialization1 = Socialization) %>%
-  select("ID", "ADOS1", "MullenRaw1", "ExpressiveLangRaw1", "Socialization1")
+  rename(ADOS1 = ADOS, MullenRaw1 = MullenRaw, ExpressiveLangRaw1 = ExpressiveLangRaw, Socialization1 = Socialization)
   
 final_merge <- inner_join(merged_df, visit1_df, by = "ID")
 
@@ -249,7 +249,7 @@ Now we want to
 * make sure the variables have sensible values. E.g. right now gender is marked 1 and 2, but in two weeks you will not be able to remember, which gender were connected to which number, so change the values from 1 and 2 to Female and Male in the gender variable (calling Female F would create issues, since F is also used for FALSE). For the same reason, you should also change the values of Diagnosis from A and B to ASD (autism spectrum disorder) and TD (typically developing). Tip: Try taking a look at ifelse(), or google "how to rename levels in R".
 * Save the data set using into a csv file. Hint: look into write.csv()
 
-```{r Renaming columns}
+```{r Renaming levels}
 
 final_merge$Gender[final_merge$Gender == 1] <- "Male"
 final_merge$Gender[final_merge$Gender == 2] <- "Female"
